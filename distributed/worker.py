@@ -77,7 +77,6 @@ PENDING = ("waiting", "ready", "constrained")
 PROCESSING = ("waiting", "ready", "constrained", "executing", "long-running")
 READY = ("ready", "constrained")
 
-
 DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
 
 DEFAULT_METRICS = {}
@@ -2312,8 +2311,10 @@ class Worker(ServerNode):
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         kwargs = kwargs or {}
         future = executor.submit(function, *args, **kwargs)
+        start_time = time()
+
         pc = PeriodicCallback(
-            lambda: logger.debug("future state: %s - %s", key, future._state), 1000
+            lambda: self.watch_task_execution(start_time, future, key), 1000
         )
         pc.start()
         try:
@@ -2325,6 +2326,20 @@ class Worker(ServerNode):
 
         # logger.info("Finish job %d, %s", i, key)
         raise gen.Return(result)
+
+    def watch_task_execution(self, start_time, future, key):
+        processing_time = time() - start_time
+        logger.debug(
+            "future state: %s - %s - processing for %.2f seconds",
+            key,
+            future._state,
+            processing_time,
+        )
+        # make factor configurable?
+        if processing_time > 2 * self.durations[key]:
+            logger.debug("future %s is taking longer than expected", key)
+            self.durations[key] = 2 * processing_time
+            # send updated duration to scheduler?
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
         kwargs = kwargs or {}
@@ -3223,7 +3238,6 @@ async def get_data_from_worker(
 
 
 job_counter = [0]
-
 
 cache_loads = LRU(maxsize=100)
 
