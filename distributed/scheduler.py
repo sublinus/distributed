@@ -1248,6 +1248,7 @@ class Scheduler(ServerNode):
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
+            "adapt-timing": self.handle_adapt_timing,
         }
 
         client_handlers = {
@@ -2693,6 +2694,17 @@ class Scheduler(ServerNode):
         self.total_occupancy -= ws.processing[ts]
         ws.processing[ts] = 0
         self.check_idle_saturated(ws)
+
+    def handle_adapt_timing(self, key=None, new_compute_time=None, worker=None):
+        logger.info(
+            "Received adapt-timing message for key %s to time %s on worker %s",
+            key,
+            new_compute_time,
+            worker,
+        )
+        self.tasks[key].prefix.duration_average = new_compute_time
+        # propagate that back to all other workers
+        # and reevaluate occupancy
 
     async def handle_worker(self, comm=None, worker=None):
         """

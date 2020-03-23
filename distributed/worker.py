@@ -2339,7 +2339,14 @@ class Worker(ServerNode):
         if processing_time > 2 * self.durations[key]:
             logger.debug("future %s is taking longer than expected", key)
             self.durations[key] = 2 * processing_time
-            # send updated duration to scheduler?
+            # send updated duration to scheduler
+            self.batched_stream.send(
+                {
+                    "op": "adapt-timing",
+                    "key": key,
+                    "new_compute_time": 2 * processing_time,
+                }
+            )
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
         kwargs = kwargs or {}
