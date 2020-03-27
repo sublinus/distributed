@@ -620,6 +620,7 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "update-task-duration": self.update_task_duration,
         }
 
         stream_handlers = {
@@ -1449,6 +1450,21 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
             raise
+
+    def update_task_duration(self, prefix, new_duration):
+        self.durations = self.durations.update(
+            {
+                k: new_duration
+                for k, v in filter(
+                    lambda k: key_split(k) == prefix, self.durations.items()
+                )
+            }
+        )
+        logger.info(
+            "Updated exepcted durations for task prefix %s to %d s",
+            prefix,
+            new_duration,
+        )
 
     def transition_dep(self, dep, finish, **kwargs):
         try:
@@ -2328,7 +2344,7 @@ class Worker(ServerNode):
         raise gen.Return(result)
 
     def watch_task_execution(self, start_time, future, key):
-        processing_time = time() - start_time
+        processing_time = time() - start_time  # TODO: limit precision sensibly
         logger.debug(
             "future state: %s - %s - processing for %.2f seconds",
             key,
@@ -2338,7 +2354,6 @@ class Worker(ServerNode):
         # make factor configurable?
         if processing_time > 2 * self.durations[key]:
             logger.debug("future %s is taking longer than expected", key)
-            self.durations[key] = 2 * processing_time
             # send updated duration to scheduler
             self.batched_stream.send(
                 {

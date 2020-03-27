@@ -2695,16 +2695,30 @@ class Scheduler(ServerNode):
         ws.processing[ts] = 0
         self.check_idle_saturated(ws)
 
-    def handle_adapt_timing(self, key=None, new_compute_time=None, worker=None):
+    async def handle_adapt_timing(self, key=None, new_compute_time=None, worker=None):
         logger.info(
             "Received adapt-timing message for key %s to time %s on worker %s",
             key,
             new_compute_time,
             worker,
         )
-        self.tasks[key].prefix.duration_average = new_compute_time
+        prefix = self.tasks[key].prefix
+        if prefix.duration_average:
+            prefix.duration_average = (
+                0.5 * prefix.duration_average + 0.5 * new_compute_time
+            )
+        else:
+            prefix.duration_average = new_compute_time
         # propagate that back to all other workers
         # and reevaluate occupancy
+        await self.broadcast(
+            msg={
+                "op": "update-task-duration",
+                "prefix": prefix.name,
+                "new_duration": new_compute_time,
+            }
+        )
+        self.reevaluate_occupancy()
 
     async def handle_worker(self, comm=None, worker=None):
         """

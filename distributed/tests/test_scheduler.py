@@ -2082,3 +2082,16 @@ async def test_unknown_task_duration_config(client, s, a, b):
     assert len(s.unknown_durations) == 1
     await wait(future)
     assert len(s.unknown_durations) == 0
+
+
+@gen_cluster(
+    client=True, config={"distributed.scheduler.unknown-task-durations": "500ms"}
+)
+async def test_dynamic_timing(client, s, a, b):
+    futures = client.map(slowinc, range(20), delay=1.5)
+    while not len(s.tasks) == 20:
+        await asyncio.sleep(0.00001)
+    assert s.total_occupancy == 10
+    while len(list(filter(lambda ts: ts.state == "memory", s.tasks.values()))) < 1:
+        await asyncio.sleep(0.00001)
+    assert s.total_occupancy >= 28.5
