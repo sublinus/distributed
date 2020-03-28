@@ -221,6 +221,8 @@ class Worker(ServerNode):
         The priority of a key given by the scheduler.  Determines run order.
     * **durations**: ``{key: float}``
         Expected duration of a task
+    * **average_durations**: ``{prefix: float}``
+        Average durations of currently processing tasks by prefix
     * **resource_restrictions**: ``{key: {str: number}}``
         Abstract resources required to run a task
 
@@ -370,6 +372,7 @@ class Worker(ServerNode):
         self.priorities = dict()
         self.generation = 0
         self.durations = dict()
+        self.average_durations = dict()
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
 
@@ -1451,19 +1454,15 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def update_task_duration(self, prefix, new_duration):
-        self.durations = self.durations.update(
-            {
-                k: new_duration
-                for k, v in filter(
-                    lambda k: key_split(k) == prefix, self.durations.items()
-                )
-            }
-        )
+    def update_task_duration(self, comm=None, prefix=None, new_duration=None):
+        if self.average_durations.get(prefix):
+            self.average_durations[prefix] = (
+                0.5 * new_duration + 0.5 * self.average_durations[prefix]
+            )
+        else:
+            self.average_durations[prefix] = new_duration
         logger.info(
-            "Updated exepcted durations for task prefix %s to %d s",
-            prefix,
-            new_duration,
+            "Updated expected durations for task prefix %s to %ds", prefix, new_duration
         )
 
     def transition_dep(self, dep, finish, **kwargs):
@@ -2351,9 +2350,15 @@ class Worker(ServerNode):
             future._state,
             processing_time,
         )
-        # make factor configurable?
-        if processing_time > 2 * self.durations[key]:
-            logger.debug("future %s is taking longer than expected", key)
+        prefix = key_split(key)
+        if self.average_durations.get(prefix):
+            limit = 2 * self.average_durations[prefix]
+        else:
+            limit = 2 * self.durations[key]
+
+        if processing_time > limit:
+            logger.info("future %s is taking longer than expected", key)
+            self.average_durations[key_split(key)] = processing_time
             # send updated duration to scheduler
             self.batched_stream.send(
                 {
@@ -2362,6 +2367,7 @@ class Worker(ServerNode):
                     "new_compute_time": 2 * processing_time,
                 }
             )
+            self.ensure_communicating()
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
         kwargs = kwargs or {}

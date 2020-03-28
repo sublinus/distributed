@@ -3,6 +3,7 @@ import cloudpickle
 import pickle
 from collections import defaultdict
 import json
+from math import floor
 import operator
 import re
 import sys
@@ -2085,13 +2086,25 @@ async def test_unknown_task_duration_config(client, s, a, b):
 
 
 @gen_cluster(
-    client=True, config={"distributed.scheduler.unknown-task-durations": "500ms"}
+    client=True, config={"distributed.scheduler.unknown-task-duration": "500ms"}
 )
 async def test_dynamic_timing(client, s, a, b):
     futures = client.map(slowinc, range(20), delay=1.5)
     while not len(s.tasks) == 20:
         await asyncio.sleep(0.00001)
     assert s.total_occupancy == 10
-    while len(list(filter(lambda ts: ts.state == "memory", s.tasks.values()))) < 1:
+    while floor(s.total_occupancy) != 40:
+        await asyncio.sleep(0.001)
+    assert a.executed_count == b.executed_count == 0
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "2s"})
+async def test_dynamic_timing_inactive_below_threshold(client, s, a, b):
+    futures = client.map(slowinc, range(20), delay=2)
+    while not len(s.tasks) == 20:
         await asyncio.sleep(0.00001)
-    assert s.total_occupancy >= 28.5
+    assert s.total_occupancy == 40
+    while len(list(filter(lambda ts: ts.state == "memory", s.tasks.values()))) < 1:
+        # make sure there is no increase in occupancy through dynamic timing
+        assert s.total_occupancy == 40
+        await asyncio.sleep(0.00001)
